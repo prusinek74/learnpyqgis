@@ -4,11 +4,13 @@ import json
 
 
 def getVertices(layerid, featureid):
-    """Acces to feature in QgsVectorLayer. Get data form feature and return verticles of geometry in JSON style file"""
+    """Acces to feature in QgsVectorLayer. Get data form feature and return verticles of geometry in JSON style file
+    Get data from metadata column (if exists). Add value accuraty to points
+    """
 
     project = QgsProject.instance()
 
-    # check layerid & featureid - if not valid and not excist - terminate function
+    # check layerid & featureid - if not valid and not excist - terminate function, get geometry from feature
     layer = project.mapLayer(layerid)
     if layer is None:
         print('Layer not exists in project')
@@ -25,7 +27,7 @@ def getVertices(layerid, featureid):
     # if p not in params:
     #    self.writeResponse('f"{self.TR('missingUp'}){p}{self.TR('parameter')}" , 400)'
 
-    # get crs project, layer, check if crs layer = crs project if no - transform, transform to wgs???
+    # get crs project, layer, check if crs layer = crs project if no transform to project crs
     proj_crs = project.crs()
     layer_crs = layer.crs()
     wgs_crs = QgsCoordinateReferenceSystem.fromEpsgId(4326)
@@ -42,7 +44,6 @@ def getVertices(layerid, featureid):
         metadata = 'missing_metadata'
     try:
         metadata_json = json.loads(metadata)
-        # metadata_points = []
         for feature in metadata_json:
             try:
                 feature['lat'], feature['lon'], feature['accuracy']
@@ -51,15 +52,20 @@ def getVertices(layerid, featureid):
             else:
                 feature_pkt = QgsGeometry(QgsPoint(feature['lat'], feature['lon']))
                 feature_pkt.transform(wgs_crs2proj_crs)
+                feature_pkt = feature_pkt.asPoint()
                 feature_pkt.cq = feature['accuracy']
-                metadata_points.append(feature_pkt.asPoint())
+                metadata_points.append(feature_pkt)
         print('metadata is valid json file')
     except json.decoder.JSONDecodeError:
         print('metadata is not valid json file')
 
-    # TODO function to QgsPoint()
+    # auxiliary function for QgsPoint()
     def pointdata(geometry, numberpoint, metadata_points=[]):
-        vertexdata = {}
+        vertexdata = dict()
+        vertexdata['id'] = numberpoint
+        vertexdata['x'] = geometry.x()
+        vertexdata['y'] = geometry.y()
+        vertexdata['z'] = geometry.z()
         epsilon = 0.02  # epsilon accuracy
         pointxy = QgsPointXY(geometry)
         for metadatafeature in metadata_points:
@@ -68,13 +74,9 @@ def getVertices(layerid, featureid):
                 break
             else:
                 vertexdata['cq'] = None
-        vertexdata['id'] = numberpoint
-        vertexdata['x'] = geometry.x()
-        vertexdata['y'] = geometry.y()
-        vertexdata['z'] = geometry.z()
         return vertexdata
 
-    # TODO function to QgsLine()
+    # auxiliary function for  QgsLine()
     def linedata(geometry, numberpoints, metadata_points=[]):
         linevertex = []
         for count, geom in enumerate(geometry, start=numberpoints):
@@ -85,7 +87,7 @@ def getVertices(layerid, featureid):
             pass
         return linevertex
 
-    # TODO function to QgsPolygon()
+    # auxiliary function for QgsPolygon()
     def polygondata(geometry, numberpoints, metadata_points=[]):
         linevertex = []
         objectJson = linedata(geometry.exteriorRing(), numberpoints, metadata_points)
@@ -98,6 +100,7 @@ def getVertices(layerid, featureid):
             numberpoints += len(objectJson)
         return linevertex, numberpoints
 
+    # start work with geometry
     pointnumber = 1
     objectJson = []
     # geometry Point/PointZ
@@ -108,45 +111,25 @@ def getVertices(layerid, featureid):
         for pointcount, geom in enumerate(geometry.get(), pointnumber):
             objectJson.append([pointdata(geom, pointcount, metadata_points)])
     # geometry Linestrng/LinestringZ
-    # TODO parse QgsLineString()
     elif geometry.wkbType() in (2, 1002):
         objectJson = linedata(geometry.get(), pointnumber, metadata_points)
-
-    # TODO parse QgsMultiLineString()
     elif geometry.wkbType() in (5, 1005):
         for geom in geometry.get():
-            objectpart = []
+            # objectpart = []
             geompart = linedata(geom, pointnumber, metadata_points)
             pointnumber += len(geompart)
             objectJson.append(geompart)
-
-    # TODO parse QgsPolygon()
+    # geometry Polygon/PolygonZ
     elif geometry.wkbType() in (3, 1003):
         objectJson = (polygondata(geometry.get(), pointnumber, metadata_points))[0]
-
-    # TODO parse QgsMultiPolygon()
+    # geometry MultiPolygon/MultiPolygonZ
     elif geometry.wkbType() in (6, 1006):
         for geom in geometry.get():
-            objectpart = []
+            # objectpart = []
             geompart, actnumber = polygondata(geom, pointnumber, metadata_points)
             pointnumber += actnumber
             objectJson.append(geompart)
-
     else:
         print('Not known geometry type')
         return
-
-    # TODO return data
     return objectJson
-
-
-# v_layerid = 'point_8271c477_c4cd_4efc_a169_d577f6a6a0aa' # point
-# v_layerid = 'multipoint_0effc077_b7e2_43da_b859_61b614974e44' # multipoint
-# v_layerid ='line_fc04e6eb_dc38_4e5d_85cb_fae9c4769610'   # line
-# v_layerid = 'test_form_58b5c999_3d05_44e8_890c_d60a421421ab' # multi line
-
-# v_layerid = 'poligon3_a7c9096c_d3f5_4f35_b164_fd73f078fc7c' # polygon
-v_layerid = 'multipoligon_f56d1f88_ff47_498c_a922_5009c819f8cf'  # multi polygon
-v_featureid = 1
-
-print(getVertices(v_layerid, v_featureid))
